@@ -1,5 +1,6 @@
 import glob
 import os
+import shlex
 import subprocess
 import sys
 import threading
@@ -863,6 +864,13 @@ else:
             )
 
 
+# Apply optional flags to every CUDA extension.  This allows container builds to
+# select NVCC driver features without duplicating the option in each extension.
+nvcc_append_flags = shlex.split(os.environ.get("NVCC_APPEND_FLAGS", ""))
+if nvcc_append_flags:
+    print(f"[apex] Appending NVCC flags: {nvcc_append_flags}")
+
+
 # Prevent file conflicts when multiple extensions are compiled simultaneously
 class BuildExtensionSeparateDir(BuildExtension):
     build_extension_patch_lock = threading.Lock()
@@ -872,6 +880,14 @@ class BuildExtensionSeparateDir(BuildExtension):
         if parallel is not None:
             self.parallel = parallel
         super().finalize_options()
+
+    def build_extensions(self):
+        if nvcc_append_flags:
+            for ext in self.extensions:
+                extra_compile_args = getattr(ext, "extra_compile_args", None)
+                if isinstance(extra_compile_args, dict) and "nvcc" in extra_compile_args:
+                    extra_compile_args["nvcc"] += nvcc_append_flags
+        super().build_extensions()
 
     def build_extension(self, ext):
         with self.build_extension_patch_lock:
